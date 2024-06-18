@@ -1501,6 +1501,14 @@ MesCC-Tools), and finally M2-Planet.")
   (package
     (inherit musl)
     (name "musl-boot")
+    (version "1.2.4")
+    (source (origin
+              (method url-fetch)
+              (uri (string-append "https://www.musl-libc.org/releases/"
+                                  "musl-" version ".tar.gz"))
+              (sha256
+               (base32
+                "0fgh2hhsbaksx7my6yiva4jqixi6hxwxx20ivb0afwjk7piyldbs"))))
     (native-inputs `(("gcc" ,gcc-muslboot0)
                    ,@(modify-inputs (package-native-inputs musl-boot0)
                                     (delete "tcc")
