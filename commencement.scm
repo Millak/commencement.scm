@@ -1049,6 +1049,7 @@ MesCC-Tools), and finally M2-Planet.")
                (base32
                 "18r2a00k82hz0mqdvgm7crzc7305l36109c0j9yjmkxj2alcjw0k"))))
     (native-inputs (%boot-tcc-inputs))
+    (inputs '())
     (arguments
      (list
        #:tests? #f                      ; musl has no tests
@@ -1067,6 +1068,7 @@ MesCC-Tools), and finally M2-Planet.")
        #~(let ((bash #$(this-package-native-input "bash")))
            (list "CC=tcc"
                  (string-append "CONFIG_SHELL=" bash "/bin/sh")
+                 ;(string-append "--syslibdir=" #$output "/lib")
                  "--disable-shared"
                  "--disable-gcc-wrapper"))
        #:phases
@@ -1509,7 +1511,8 @@ MesCC-Tools), and finally M2-Planet.")
   (package
     (inherit musl)
     (name "musl-boot")
-    (version "1.2.4")
+    ;(version "1.2.4")
+    #;
     (source (origin
               (method url-fetch)
               (uri (string-append "https://www.musl-libc.org/releases/"
@@ -1521,6 +1524,7 @@ MesCC-Tools), and finally M2-Planet.")
                    ,@(modify-inputs (package-native-inputs musl-boot0)
                                     (delete "tcc")
                                     (append binutils-muslboot0))))
+    (inputs '())
     (arguments
      (substitute-keyword-arguments (package-arguments musl-boot0)
        ((#:guile _) %bootstrap-guile)
@@ -1528,13 +1532,29 @@ MesCC-Tools), and finally M2-Planet.")
        ((#:make-flags _)
         #~(list (string-append "SHELL=" #$(this-package-native-input "bash")
                           "/bin/bash")))
-       ((#:configure-flags _)
+       ((#:configure-flags _ #~'())
         #~(list (string-append "CONFIG_SHELL="
                                #$(this-package-native-input "bash")
                                "/bin/sh")
+                (string-append "--syslibdir=" #$output "/lib")
                 "CC=gcc"
-                "--disable-shared"))))))
-
+                ;"--disable-shared"
+                ;"--disable-static"
+                "--enable-gcc-wrapper"
+                ))
+       ((#:phases phases #~'%standard-phases)
+        #~(modify-phases #$phases
+            (add-after 'install 'symlink-dynamic-linker
+              ;; This is a hack to work around not being able to hardcode
+              ;; the location of the dynamic linker for musl in gcc without
+              ;; adding musl as an input for gcc.
+              ;; Because honestly it's easier to add support to musl for
+              ;; (glibc-dynamic-linker) support than to adjust other software
+              ;; to use musl's dynamic-linker location.
+              (lambda _
+                (symlink "libc.so";(string-append #$output "/lib/libc.so")
+                         (string-append #$output #$(glibc-dynamic-linker)))))))
+       ))))
 
 (define gnu-make-muslboot
   (package
