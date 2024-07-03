@@ -1716,11 +1716,9 @@ MesCC-Tools), and finally M2-Planet.")
            (lambda _
              (invoke "./hello"))))))))
 
-
-
-(define gcc-muslboot-9
+(define gcc-muslboot-7
   (package
-    (inherit gcc-9)
+    (inherit gcc-7)
     (name "gcc-muslboot")
     (inputs (list flex   ;; TODO: bootstrap me
                   bison  ;; TODO: bootstrap me
@@ -1750,22 +1748,67 @@ MesCC-Tools), and finally M2-Planet.")
               (lambda _
                 (for-each (lambda (file)
                            (delete-file-recursively file))
-                   (find-files "gcc/testsuite/gdc.test/compilable" "\\.d$"))))))
-        ((#:parallel-build? _ #t) #f)
-        ((#:make-flags f #t) #~(list))
-        ((#:configure-flags flags)
+                   (find-files "gcc/testsuite/gdc.test/compilable" "\\.d$"))))
+            (add-after 'pre-configure 'fix-dynamic-linker-for-musl
+              (lambda* (#:key inputs #:allow-other-keys)
+                (let ((libc (assoc-ref inputs "libc")))
+                  ;; Fix the dynamic linker's file name.
+                  ;; This should work on gcc-13 for all architectures except loongarch.
+                  (substitute* (find-files "gcc/config"
+                                           "^(aarch64-)?(linux|gnu|sysv4)(64|-elf|-eabi)?\\.h$")
+                    (("(#define MUSL_DYNAMIC_LINKER*).*$" _ dynamic-linker)
+                     ;; TODO: Make this use architecture specific ld-musl-*.so
+                     (string-append dynamic-linker " \"" libc "/lib/libc.so\""))
+                    ;; We also need to adjust the references made for glibc
+                    ;; to point to the musl linker location
+                    (("#define (GLIBC|GNU_USER)_DYNAMIC_LINKER([^ \t]*).*$"
+                      _ gnu-user suffix)
+                     (format #f "#define ~a_DYNAMIC_LINKER~a \"~a\"~%"
+                             gnu-user suffix
+                             (string-append libc "/lib/libc.so")))))))
+            #;
+            (add-before 'configure 'adjust-os-defines-h
+              (lambda _
+                ;; The gnu-linux version chokes on '__GLIBC_PREREQ(2,15)'
+                ;; We need to use the generic version for musl.
+                (copy-file "libstdc++-v3/config/os/generic/os_defines.h"
+                           "libstdc++-v3/config/os/gnu-linux/os_defines.h")
+                #;
+                (with-output-to-file "libstdc++-v3/config/os/gnu-linux/os_defines.h"
+                  (lambda _
+                    (display "#ifndef _GLIBCXX_OS_DEFINES
+#define _GLIBCXX_OS_DEFINES 1
+#define __NO_CTYPE 1
+#include <features.h>
+#endif")))))
+            (add-before 'configure 'setenv
+              (lambda _
+                ;; This is needed to wrap gcc to use musl correctly.
+                (setenv "CC" "musl-gcc")))))
+        ;; gimple-match.c:43995:1: internal compiler error: Segmentation fault
+        ;; Only with --disable-bootstrap?
+        ;((#:parallel-build? _ #t) #f)
+        ((#:configure-flags _ #~'())
          #~(let ((out (assoc-ref %outputs "out"))
                  (musl (assoc-ref %build-inputs "libc")))
-            (list "LDFLAGS=-static"
+            (list ;"LDFLAGS=-static"
                   (string-append "--prefix=" out)
-                  ;"--host=riscv64-unknown-linux-musl"
-                  ;"--build=riscv64-unknown-linux-musl"
-                  (string-append "--with-build-sysroot=" musl )
-                  (string-append "--with-native-system-header-dir=" "/include")
-                  "--disable-bootstrap"
+                  "--with-local-prefix=/no-gcc-local-prefix"
+                  "--host=riscv64-unknown-linux-musl"
+                  "--build=riscv64-unknown-linux-musl"
+                  ;(string-append "--with-build-sysroot=" musl )
+                  (string-append "--with-native-system-header-dir=" musl "/include")
+                  (string-append "--with-gxx-include-dir=" out "/include/c++")
+
+                  ;; These 3 seem necessary after switching CC to musl-gcc.
+                  (string-append "--with-gmp=" (assoc-ref %build-inputs "gmp-boot"))
+                  (string-append "--with-mpfr=" (assoc-ref %build-inputs "mpfr-boot"))
+                  (string-append "--with-mpc=" (assoc-ref %build-inputs "mpc-boot"))
+
+                  ;"--disable-bootstrap"
                   "--disable-decimal-float"
                   "--disable-libatomic"
-                  "--disable-libcilkrt"
+                  "--disable-libcilkrts"
                   "--disable-libgomp"
                   "--disable-libitm"
                   "--disable-libmudflap"
@@ -1773,14 +1816,147 @@ MesCC-Tools), and finally M2-Planet.")
                   "--disable-libsanitizer"
                   "--disable-libssp"
                   "--disable-libvtv"
+
+                  ;; Need to recompile musl with -fPIC
+                  ;; ld: unrecognized option '-plugin'
                   "--disable-lto"
                   "--disable-lto-plugin"
+
                   "--disable-multilib"
+
+                  ;;  Building GCC with plugin support requires a host that supports
+                  ;; -fPIC, -shared, -ldl and -rdynamic.
+                  ;; ld: unrecognized option '-plugin'
+                  ;; Is that even relevant for this flag?
+                  ;"--enable-plugin"
                   "--disable-plugin"
-                  "--disable-threads"
+
+                  ;"--disable-threads"
+                  ;"--enable-languages=c,c++"
                   "--enable-languages=c"
+
+                  ;; libgcc recompile with -fPIC
+                  ;"--enable-static"
+                  ;"--disable-static"
+                  ;"--disable-shared"
+
+                  ;"--enable-threads=single"
+                  "--disable-libstdcxx-pch"
+                  "--disable-build-with-cxx"
+                  )))))))
+
+(define gcc-muslboot-9
+  (package
+    (inherit gcc-muslboot-7)
+    (name "gcc-muslboot")
+    (version (package-version gcc-9))
+    #;
+    (inputs (list flex   ;; TODO: bootstrap me
+                  bison  ;; TODO: bootstrap me
+                  gmp-boot    ;; TODO: bootstrap me
+                  mpfr-boot   ;; TODO: bootstrap me
+                  mpc-boot    ;; TODO: bootstrap me
+                  ))
+    #;
+    (propagated-inputs (list))
+    #;
+    (native-inputs `(("tar" ,tar)  ;; TODO: bootstrap me
+                     ("xz"  ,xz)   ;; TODO: bootstrap me
+                     ("awk" ,gawk) ;; TODO: bootstrap me
+                     ; ("sed" ,sed)  ;; TODO: bootstrap me
+                     ;("diffutils" ,diffutils)
+                     ,@(modify-inputs (%boot-muslboot-inputs)
+                                      (delete "bootar"))))
+    #;
+    (arguments
+      (substitute-keyword-arguments (package-arguments gcc-9)
+        ((#:guile _) %bootstrap-guile)
+        ((#:implicit-inputs? _ #f) #f)
+        ((#:phases phases)
+         #~(modify-phases #$phases
+            (add-after 'patch-source-shebangs 'patch-extra-shebangs
+              (lambda _
+                (substitute* "gcc/genmultilib"
+                  (("#!/bin/sh") (string-append "#!" (which "sh"))))))
+            (add-before 'patch-source-shebangs 'delete-broken-shebangs
+              (lambda _
+                (for-each (lambda (file)
+                           (delete-file-recursively file))
+                   (find-files "gcc/testsuite/gdc.test/compilable" "\\.d$"))))))
+        ;; gimple-match.c:43995:1: internal compiler error: Segmentation fault
+        ((#:parallel-build? _ #t) #f)
+        ((#:configure-flags _ #~'())
+         #~(let ((out (assoc-ref %outputs "out"))
+                 (musl (assoc-ref %build-inputs "libc")))
+            (list ;"LDFLAGS=-static"
+                  (string-append "--prefix=" out)
+                  ;"--host=riscv64-unknown-linux-musl"
+                  ;"--build=riscv64-unknown-linux-musl"
+                  ;(string-append "--with-build-sysroot=" musl )
+                  (string-append "--with-native-system-header-dir=" musl "/include")
+
+                  (string-append "--with-gxx-include-dir=" out "/include")
+
+                  "--disable-bootstrap"
+                  ;"--disable-decimal-float"
+                  ;"--disable-libatomic"
+                  ;"--disable-libcilkrts"
+                  "--disable-libgomp"
+                  ;"--disable-libitm"
+                  ;"--disable-libmudflap"
+                  ;"--disable-libquadmath"
+                  ;"--disable-libsanitizer"
+                  ;"--disable-libssp"
+                  ;"--disable-libvtv"
+
+                  ;; Need to recompile musl with -fPIC
+                  "--disable-lto"
+                  "--disable-lto-plugin"
+
+                  "--disable-multilib"
+
+                  ;;  Building GCC with plugin support requires a host that supports
+                  ;; -fPIC, -shared, -ldl and -rdynamic.
+                  ;"--enable-plugin"
+                  "--disable-plugin"
+
+                  ;"--disable-threads"
+                  "--enable-languages=c,c++"
+
+                  ;; libgcc recompile with -fPIC
                   "--enable-static"
                   "--disable-shared"
-                  "--enable-threads=single"
-                  "--disable-libstdcxx-pch"
-                  "--disable-build-with-cxx")))))))
+
+                  ;"--enable-threads=single"
+                  ;"--disable-libstdcxx-pch"
+                  ;"--disable-build-with-cxx"
+                  )))))))
+
+(define test-hello
+  (package
+    (inherit hello)
+    (name "test-hello")
+    (version "2.10")
+    (source
+     (origin
+       (inherit (package-source hello))
+       (uri (string-append "mirror://gnu/hello/hello-" version
+                           ".tar.gz"))
+       (sha256
+        (base32
+         "0ssi1wpaf7plaswqqjwigppsg5fyh99vdlb9kzl7c9lng89ndq1i"))))
+    (inputs (list gcc-muslboot-9))
+    (propagated-inputs '())
+    (native-inputs (%boot-muslboot-inputs))
+    (arguments
+     `(#:implicit-inputs? #f
+       #:guile ,%bootstrap-guile
+       #:parallel-build? #f
+       ;; checking for grep that handles long lines and -e...
+       ;; configure: error: no acceptable grep could be found
+       #:configure-flags '("ac_cv_path_GREP=grep")
+       #:phases
+       (modify-phases %standard-phases
+         (replace 'check
+           (lambda _
+             (invoke "./hello"))))))))
