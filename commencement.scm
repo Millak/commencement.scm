@@ -1471,6 +1471,25 @@ MesCC-Tools), and finally M2-Planet.")
                    (substitute* (list "libiberty/alloca.c"
                                       "include/libiberty.h")
                      (("C_alloca") "alloca"))))
+               (add-before 'configure 'fix-dynamic-linker-for-musl
+                 (lambda* (#:key inputs #:allow-other-keys)
+                   (let ((libc (assoc-ref inputs "libc")))
+                     ;; Fix the dynamic linker's file name.
+                     ;; This should work on gcc-13 for all architectures except loongarch.
+                     (substitute* (find-files "gcc/config"
+                                              "^(aarch64-)?(linux|gnu|sysv4)(64|-elf|-eabi)?\\.h$")
+                       (("(#define MUSL_DYNAMIC_LINKER*).*$" _ dynamic-linker)
+                        ;; TODO: Make this use architecture specific ld-musl-*.so
+                        (string-append dynamic-linker " \"" libc "/lib/libc.so\"")))
+                     ;; We also need to adjust the references made for glibc
+                     ;; to point to the musl linker location
+                     (substitute* (find-files "gcc/config"
+                                              "^(linux|gnu|sysv4)(64|-elf|-eabi)?\\.h$")
+                       (("#define (GLIBC|GNU_USER)_DYNAMIC_LINKER([^ \t]*).*$"
+                         _ gnu-user suffix)
+                        (format #f "#define ~a_DYNAMIC_LINKER~a \"~a\"~%"
+                                gnu-user suffix
+                                (string-append libc "/lib/libc.so")))))))
                (add-after 'unpack 'patch-for-modern-libc
                  (lambda _
                    (for-each
