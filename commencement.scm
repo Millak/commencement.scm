@@ -1620,6 +1620,10 @@ MesCC-Tools), and finally M2-Planet.")
                      "--build=riscv64-unknown-linux-musl" ; TODO: generalize for every arch
                      "--host=riscv64-unknown-linux-musl"  ; TODO: generalize for every arch
                      (string-append "--with-build-sysroot=" musl "/include")
+                     ;; These 3 seem necessary after switching CC to musl-gcc.
+                     (string-append "--with-gmp=" (assoc-ref %build-inputs "gmp-boot"))
+                     (string-append "--with-mpfr=" (assoc-ref %build-inputs "mpfr-boot"))
+                     (string-append "--with-mpc=" (assoc-ref %build-inputs "mpc-boot"))
                      "--disable-bootstrap"
                      "--disable-decimal-float"
                      "--disable-libatomic"
@@ -1651,7 +1655,7 @@ MesCC-Tools), and finally M2-Planet.")
                      (bash     (assoc-ref inputs "bash"))
                      (gcc      (assoc-ref inputs "gcc"))
                      (musl     (assoc-ref inputs "libc")))
-                (setenv "CC" "gcc")
+                (setenv "CC" "musl-gcc")
                 (setenv "AR" "ar")
                 (setenv "AS" "as")
                 (setenv "CONFIG_SHELL" (string-append bash "/bin/sh"))
