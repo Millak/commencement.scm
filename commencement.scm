@@ -1247,10 +1247,18 @@ MesCC-Tools), and finally M2-Planet.")
                               (#t (platform-system->target
                                     (%current-system)))))))))))
 
+;; Is this needed?
+(define ld-wrapper-muslboot0
+  (make-ld-wrapper "ld-wrapper-muslboot0"
+                   ;#:target "riscv64-linux-gnu"
+                   #:binutils binutils-muslboot0
+                   #:bash gash-boot
+                   #:guile-for-build %bootstrap-guile))
 
 (define (%boot-muslboot0-inputs)
   `(("kernel-headers" ,%bootstrap-linux-libre-headers)
     ("libc" ,musl-boot0)
+    ("ld-wrapper" ,ld-wrapper-muslboot0)
     ("binutils" ,binutils-muslboot0)
     ,@(%boot-tcc-musl-inputs)))
 
