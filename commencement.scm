@@ -1585,10 +1585,15 @@ MesCC-Tools), and finally M2-Planet.")
                                     (delete "tcc")
                                     (append binutils-muslboot0))))
     (arguments
-      (substitute-keyword-arguments (package-arguments gnu-make-mesboot0-riscv64)
+      (substitute-keyword-arguments
+        (strip-keyword-arguments
+          '(#:phases)
+          (package-arguments gnu-make-mesboot0-riscv64))
         ((#:guile _) %bootstrap-guile)
         ((#:implicit-inputs? _ #f) #f)
-        ((#:phases _) #~%standard-phases)))))
+        ((#:configure-flags cf #~'())
+         #~(cons* "CC=musl-gcc" #$cf))
+        ))))
 
 
 (define gcc-muslboot
